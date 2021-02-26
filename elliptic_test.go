@@ -464,8 +464,8 @@ func TestInfinity(t *testing.T) {
 		{"P-224", elliptic.P224()},
 		{"P-256", elliptic.P256()},
 		{"P-256/Generic", elliptic.P256().Params()},
-		{"P-384", elliptic.P384()},
-		{"P-521", elliptic.P521()},
+		{"P-384", P384()},
+		{"P-521", P521()},
 	}
 	if testing.Short() {
 		tests = tests[:1]
@@ -686,18 +686,18 @@ func TestMarshalCompressed(t *testing.T) {
 		testMarshalCompressed(t, elliptic.P224(), x, y, nil)
 	})
 	t.Run("P-384", func(t *testing.T) {
-		_, x, y, err := elliptic.GenerateKey(elliptic.P384(), rand.Reader)
+		_, x, y, err := elliptic.GenerateKey(P384(), rand.Reader)
 		if err != nil {
 			t.Fatal(err)
 		}
-		testMarshalCompressed(t, elliptic.P384(), x, y, nil)
+		testMarshalCompressed(t, P384(), x, y, nil)
 	})
 	t.Run("P-521", func(t *testing.T) {
-		_, x, y, err := elliptic.GenerateKey(elliptic.P521(), rand.Reader)
+		_, x, y, err := elliptic.GenerateKey(P521(), rand.Reader)
 		if err != nil {
 			t.Fatal(err)
 		}
-		testMarshalCompressed(t, elliptic.P521(), x, y, nil)
+		testMarshalCompressed(t, P521(), x, y, nil)
 	})
 }
 

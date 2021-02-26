@@ -39,8 +39,8 @@ func TestKeyGeneration(t *testing.T) {
 		return
 	}
 	testKeyGeneration(t, elliptic.P256(), "p256")
-	testKeyGeneration(t, elliptic.P384(), "p384")
-	testKeyGeneration(t, elliptic.P521(), "p521")
+	testKeyGeneration(t, P384(), "p384")
+	testKeyGeneration(t, P521(), "p521")
 }
 
 func BenchmarkSignP256(b *testing.B) {
@@ -60,7 +60,7 @@ func BenchmarkSignP256(b *testing.B) {
 
 func BenchmarkSignP384(b *testing.B) {
 	b.ResetTimer()
-	p384 := elliptic.P384()
+	p384 := P384()
 	hashed := []byte("testing")
 	priv, _ := ecdsa.GenerateKey(p384, rand.Reader)
 
@@ -128,8 +128,8 @@ func TestSignAndVerify(t *testing.T) {
 		return
 	}
 	testSignAndVerify(t, elliptic.P256(), "p256")
-	testSignAndVerify(t, elliptic.P384(), "p384")
-	testSignAndVerify(t, elliptic.P521(), "p521")
+	testSignAndVerify(t, P384(), "p384")
+	testSignAndVerify(t, P521(), "p521")
 }
 
 func testSignAndVerifyASN1(t *testing.T, c elliptic.Curve, tag string) {
@@ -158,8 +158,8 @@ func TestSignAndVerifyASN1(t *testing.T) {
 		return
 	}
 	testSignAndVerifyASN1(t, elliptic.P256(), "p256")
-	testSignAndVerifyASN1(t, elliptic.P384(), "p384")
-	testSignAndVerifyASN1(t, elliptic.P521(), "p521")
+	testSignAndVerifyASN1(t, P384(), "p384")
+	testSignAndVerifyASN1(t, P521(), "p521")
 }
 
 func testNonceSafety(t *testing.T, c elliptic.Curve, tag string) {
@@ -195,8 +195,8 @@ func TestNonceSafety(t *testing.T) {
 		return
 	}
 	testNonceSafety(t, elliptic.P256(), "p256")
-	testNonceSafety(t, elliptic.P384(), "p384")
-	testNonceSafety(t, elliptic.P521(), "p521")
+	testNonceSafety(t, P384(), "p384")
+	testNonceSafety(t, P521(), "p521")
 }
 
 func testINDCCA(t *testing.T, c elliptic.Curve, tag string) {
@@ -230,8 +230,8 @@ func TestINDCCA(t *testing.T) {
 		return
 	}
 	testINDCCA(t, elliptic.P256(), "p256")
-	testINDCCA(t, elliptic.P384(), "p384")
-	testINDCCA(t, elliptic.P521(), "p521")
+	testINDCCA(t, P384(), "p384")
+	testINDCCA(t, P521(), "p521")
 }
 
 func fromHex(s string) *big.Int {
@@ -296,9 +296,9 @@ func TestVectors(t *testing.T) {
 			case "P-256":
 				pub.Curve = elliptic.P256()
 			case "P-384":
-				pub.Curve = elliptic.P384()
+				pub.Curve = P384()
 			case "P-521":
-				pub.Curve = elliptic.P521()
+				pub.Curve = P521()
 			default:
 				pub.Curve = nil
 			}
@@ -371,14 +371,14 @@ func testNegativeInputs(t *testing.T, curve elliptic.Curve, tag string) {
 func TestNegativeInputs(t *testing.T) {
 	testNegativeInputs(t, elliptic.P224(), "p224")
 	testNegativeInputs(t, elliptic.P256(), "p256")
-	testNegativeInputs(t, elliptic.P384(), "p384")
-	testNegativeInputs(t, elliptic.P521(), "p521")
+	testNegativeInputs(t, P384(), "p384")
+	testNegativeInputs(t, P521(), "p521")
 }
 
 func TestZeroHashSignature(t *testing.T) {
 	zeroHash := make([]byte, 64)
 
-	for _, curve := range []elliptic.Curve{elliptic.P224(), elliptic.P256(), elliptic.P384(), elliptic.P521()} {
+	for _, curve := range []elliptic.Curve{elliptic.P224(), elliptic.P256(), P384(), P521()} {
 		privKey, err := ecdsa.GenerateKey(curve, rand.Reader)
 		if err != nil {
 			panic(err)
