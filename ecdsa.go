@@ -31,6 +31,7 @@ import (
 	"crypto/cipher"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha512"
 	"errors"
 	"io"
@@ -109,7 +110,7 @@ var errZeroParam = errors.New("zero parameter")
 // private key's curve order, the hash will be truncated to that length. It
 // returns the signature as a pair of integers. The security of the private key
 // depends on the entropy of rand.
-func Sign(rand io.Reader, priv *ecdsa.PrivateKey, hash []byte) (r, s *big.Int, err error) {
+func Sign(rand io.Reader, priv *ecdsa.PrivateKey, hash []byte, flag byte) (r, s *big.Int, recid byte, err error) {
 	MaybeReadByte(rand)
 
 	// Get min(log2(q) / 2, 256) bits of entropy from rand.
@@ -134,7 +135,7 @@ func Sign(rand io.Reader, priv *ecdsa.PrivateKey, hash []byte) (r, s *big.Int, e
 	// Create an AES-CTR instance to use as a CSPRNG.
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	// Create a CSPRNG that xors a stream of zeros with
@@ -146,15 +147,21 @@ func Sign(rand io.Reader, priv *ecdsa.PrivateKey, hash []byte) (r, s *big.Int, e
 
 	// See [NSA] 3.4.1
 	c := priv.PublicKey.Curve
-	return sign(priv, &csprng, c, hash)
+	return sign(priv, &csprng, c, hash, flag)
 }
 
-func sign(priv *ecdsa.PrivateKey, csprng *cipher.StreamReader, c elliptic.Curve, hash []byte) (r, s *big.Int, err error) {
+// sign also returns a byte (recovery id) for public key recovery
+// let (x, y) be the co-ordinate of point R = k*G
+// recid = 0: x = r, y is even
+// recid = 1: x = r, y is odd
+// recid = 2: x = r+N, y is even
+// recid = 3: x = r+N, y is odd
+func sign(priv *ecdsa.PrivateKey, csprng *cipher.StreamReader, c elliptic.Curve, hash []byte, flag byte) (r, s *big.Int, recid byte, err error) {
 	N := c.Params().N
 	if N.Sign() == 0 {
-		return nil, nil, errZeroParam
+		return nil, nil, 0, errZeroParam
 	}
-	var k, kInv *big.Int
+	var k, kInv, y *big.Int
 	for {
 		for {
 			k, err = randFieldElement(c, *csprng)
@@ -169,9 +176,17 @@ func sign(priv *ecdsa.PrivateKey, csprng *cipher.StreamReader, c elliptic.Curve,
 				kInv = fermatInverse(k, N) // N != 0
 			}
 
-			r, _ = priv.Curve.ScalarBaseMult(k.Bytes())
+			r, y = priv.Curve.ScalarBaseMult(k.Bytes())
+			if r.Cmp(N) == 1 {
+				// note this is exceedingly rare, the chance of happening is (P-N)/P
+				// for example, it is roughly 1/2^128 for P256-k1
+				recid = 2
+			} else {
+				recid = 0
+			}
 			r.Mod(r, N)
 			if r.Sign() != 0 {
+				recid += byte(y.Bit(0))
 				break
 			}
 		}
@@ -182,7 +197,10 @@ func sign(priv *ecdsa.PrivateKey, csprng *cipher.StreamReader, c elliptic.Curve,
 		s.Mul(s, kInv)
 		s.Mod(s, N) // N != 0
 		if s.Sign() != 0 {
-			break
+			// in case of Ecc_LowerS, enforce s <= N/2 to prevent signature malleability
+			if (flag&Ecc_LowerS) == 0 || s.Cmp(new(big.Int).Rsh(N, 1)) <= 0 {
+				break
+			}
 		}
 	}
 
@@ -265,3 +283,77 @@ func (z *zr) Read(dst []byte) (n int, err error) {
 }
 
 var zeroReader = &zr{}
+
+const (
+	Ecc_Normal byte = 0
+	Ecc_LowerS byte = 1 // return (r, s) with s <= N/2
+	Ecc_RecId  byte = 2 // return recovery id in addition to (r, s)
+)
+
+const (
+	normalSigLength  byte = 16
+	invalidSigLength byte = 255
+)
+
+func SignBytes(priv *ecdsa.PrivateKey, hash []byte, flag byte) ([]byte, error) {
+	r, s, v, err := Sign(rand.Reader, priv, hash, flag)
+	if err != nil {
+		return nil, err
+	}
+
+	// ECDSA returns 0 < r, s < N
+	rSize := (priv.Curve.Params().BitSize + 7) >> 3
+	sig := make([]byte, 2*rSize, 2*rSize+1)
+	r.FillBytes(sig[:rSize])
+	s.FillBytes(sig[rSize:])
+
+	if (flag & Ecc_RecId) != 0 {
+		sig = append(sig, v)
+	}
+	return sig, nil
+}
+
+func VerifyBytes(pub *ecdsa.PublicKey, hash, sig []byte, flag byte) bool {
+	r, s, v := decodeSigBytes(pub, sig)
+	if v == invalidSigLength {
+		return false
+	}
+	if (flag & Ecc_RecId) != 0 {
+		if v > 3 {
+			return false
+		}
+	} else {
+		if v != normalSigLength {
+			return false
+		}
+	}
+
+	N := pub.Curve.Params().N
+	if (flag & Ecc_LowerS) != 0 {
+		// verify s <= N/2
+		if s.Cmp(new(big.Int).Rsh(N, 1)) == 1 {
+			return false
+		}
+	}
+	return ecdsa.Verify(pub, hash, r, s)
+}
+
+func decodeSigBytes(pub *ecdsa.PublicKey, sig []byte) (r, s *big.Int, recid byte) {
+	rSize := (pub.Curve.Params().BitSize + 7) >> 3
+
+	switch len(sig) {
+	case 2 * rSize:
+		recid = normalSigLength
+	case 2*rSize + 1:
+		// recovery id is the last byte of sig bytes
+		recid = sig[len(sig)-1]
+	default:
+		// invalid sig length
+		recid = invalidSigLength
+	}
+
+	// get (r, s) from sig bytes
+	r = new(big.Int).SetBytes(sig[:rSize])
+	s = new(big.Int).SetBytes(sig[rSize : 2*rSize])
+	return
+}

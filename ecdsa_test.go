@@ -54,7 +54,7 @@ func BenchmarkSignP256(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _, _ = Sign(rand.Reader, priv, hashed)
+			_, _, _, _ = Sign(rand.Reader, priv, hashed, Ecc_Normal)
 		}
 	})
 }
@@ -69,7 +69,7 @@ func BenchmarkSignP384(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _, _ = Sign(rand.Reader, priv, hashed)
+			_, _, _, _ = Sign(rand.Reader, priv, hashed, Ecc_Normal)
 		}
 	})
 }
@@ -79,7 +79,7 @@ func BenchmarkVerifyP256(b *testing.B) {
 	p256 := elliptic.P256()
 	hashed := []byte("testing")
 	priv, _ := ecdsa.GenerateKey(p256, rand.Reader)
-	r, s, _ := Sign(rand.Reader, priv, hashed)
+	r, s, _, _ := Sign(rand.Reader, priv, hashed, Ecc_Normal)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -107,7 +107,7 @@ func testSignAndVerify(t *testing.T, c elliptic.Curve, tag string) {
 	priv, _ := ecdsa.GenerateKey(c, rand.Reader)
 
 	hashed := []byte("testing")
-	r, s, err := Sign(rand.Reader, priv, hashed)
+	r, s, _, err := Sign(rand.Reader, priv, hashed, Ecc_Normal)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
@@ -169,14 +169,14 @@ func testNonceSafety(t *testing.T, c elliptic.Curve, tag string) {
 	priv, _ := ecdsa.GenerateKey(c, rand.Reader)
 
 	hashed := []byte("testing")
-	r0, s0, err := Sign(zeroReader, priv, hashed)
+	r0, s0, _, err := Sign(zeroReader, priv, hashed, Ecc_Normal)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
 	}
 
 	hashed = []byte("testing...")
-	r1, s1, err := Sign(zeroReader, priv, hashed)
+	r1, s1, _, err := Sign(zeroReader, priv, hashed, Ecc_Normal)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
@@ -207,13 +207,13 @@ func testINDCCA(t *testing.T, c elliptic.Curve, tag string) {
 	priv, _ := ecdsa.GenerateKey(c, rand.Reader)
 
 	hashed := []byte("testing")
-	r0, s0, err := Sign(rand.Reader, priv, hashed)
+	r0, s0, _, err := Sign(rand.Reader, priv, hashed, Ecc_Normal)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
 	}
 
-	r1, s1, err := Sign(rand.Reader, priv, hashed)
+	r1, s1, _, err := Sign(rand.Reader, priv, hashed, Ecc_Normal)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
@@ -397,7 +397,7 @@ func TestZeroHashSignature(t *testing.T) {
 		}
 
 		// Sign a hash consisting of all zeros.
-		r, s, err := Sign(rand.Reader, privKey, zeroHash)
+		r, s, _, err := Sign(rand.Reader, privKey, zeroHash, Ecc_Normal)
 		if err != nil {
 			panic(err)
 		}
@@ -405,6 +405,107 @@ func TestZeroHashSignature(t *testing.T) {
 		// Confirm that it can be verified.
 		if !ecdsa.Verify(&privKey.PublicKey, zeroHash, r, s) {
 			t.Errorf("zero hash signature verify failed for %T", curve)
+		}
+	}
+}
+
+func TestSignBytes(t *testing.T) {
+	for _, curve := range []elliptic.Curve{
+		elliptic.P224(),
+		elliptic.P256(),
+		P384(),
+		P521(),
+		P256k1(),
+	} {
+		privKey, err := ecdsa.GenerateKey(curve, rand.Reader)
+		if err != nil {
+			panic(err)
+		}
+
+		for _, hashed := range [][]byte{
+			make([]byte, 64),
+			[]byte("testing"),
+		} {
+
+			for _, flag := range []byte{
+				Ecc_Normal,
+				Ecc_LowerS,
+				Ecc_RecId,
+				Ecc_LowerS | Ecc_RecId,
+			} {
+				b, err := SignBytes(privKey, hashed, flag)
+				if err != nil {
+					t.Errorf("SignBytes failed for %T", curve)
+				}
+				testSignBytes(t, &privKey.PublicKey, hashed, b, flag)
+			}
+		}
+	}
+}
+
+func testSignBytes(t *testing.T, pubkey *ecdsa.PublicKey, hash, sig []byte, flag byte) {
+	if !VerifyBytes(pubkey, hash, sig, flag) {
+		t.Error("VerifyBytes failed")
+	}
+
+	// test wrong length
+	size := len(sig)
+	if VerifyBytes(pubkey, hash, sig[:size-1], flag) {
+		t.Error("VerifyBytes pass with shorter length")
+	}
+	sig = append(sig, 0)
+	if VerifyBytes(pubkey, hash, sig, flag) {
+		t.Error("VerifyBytes pass with longer length")
+	}
+	sig = sig[:size]
+
+	if (flag & Ecc_RecId) != 0 {
+		// invalid recovery id fails verification
+		v := sig[size-1]
+		sig[size-1] = 4
+		if VerifyBytes(pubkey, hash, sig, Ecc_RecId) {
+			t.Error("VerifyBytes pass with invalid recovery id")
+		}
+		if VerifyBytes(pubkey, hash, sig, Ecc_Normal) {
+			t.Error("VerifyBytes pass flag = Ecc_Normal with invalid recovery id")
+		}
+		sig[size-1] = v
+
+		// remove recovery id fails verification
+		if VerifyBytes(pubkey, hash, sig[:size-1], Ecc_RecId) {
+			t.Error("VerifyBytes pass w/o recovery id")
+		}
+		if !VerifyBytes(pubkey, hash, sig[:size-1], Ecc_Normal) {
+			t.Error("VerifyBytes fail flag = Ecc_Normal w/o recovery id")
+		}
+	} else {
+		// signature w/o recovery id fails flag = Ecc_RecId
+		if VerifyBytes(pubkey, hash, sig, Ecc_RecId) {
+			t.Error("VerifyBytes pass flag = Ecc_RecId")
+		}
+	}
+
+	if (flag & Ecc_LowerS) != 0 {
+		_, s, v := decodeSigBytes(pubkey, sig)
+		curveParam := pubkey.Curve.Params()
+		rSize := (curveParam.BitSize + 7) >> 3
+		s.Sub(curveParam.N, s)
+		s.FillBytes(sig[rSize : 2*rSize])
+
+		// (r, N-s) fails verification
+		if VerifyBytes(pubkey, hash, sig, flag) {
+			t.Error("VerifyBytes pass with (r, N-s)")
+		}
+
+		// (r, N-s) can pass flag = Ecc_Normal
+		if (flag & Ecc_RecId) != 0 {
+			if v > 3 {
+				t.Errorf("Invalid recovery id = %d", v)
+			}
+			sig = sig[:size-1]
+		}
+		if !VerifyBytes(pubkey, hash, sig, Ecc_Normal) {
+			t.Error("VerifyBytes fail flag = Ecc_Normal with (r, N-s)")
 		}
 	}
 }
