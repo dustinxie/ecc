@@ -466,6 +466,7 @@ func TestInfinity(t *testing.T) {
 		{"P-256/Generic", elliptic.P256().Params()},
 		{"P-384", P384()},
 		{"P-521", P521()},
+		{"P-256k1", P256k1()},
 	}
 	if testing.Short() {
 		tests = tests[:1]
@@ -585,21 +586,34 @@ func BenchmarkScalarMultP256(b *testing.B) {
 }
 
 func TestMarshal(t *testing.T) {
-	p224 := elliptic.P224()
-	_, x, y, err := elliptic.GenerateKey(p224, rand.Reader)
-	if err != nil {
-		t.Error(err)
-		return
+	tests := []struct {
+		curve elliptic.Curve
+	}{
+		{elliptic.P224()},
+		{elliptic.P256()},
+		{elliptic.P256().Params()},
+		{P384()},
+		{P521()},
+		{P256k1()},
 	}
-	serialized := elliptic.Marshal(p224, x, y)
-	xx, yy := elliptic.Unmarshal(p224, serialized)
-	if xx == nil {
-		t.Error("failed to unmarshal")
-		return
-	}
-	if xx.Cmp(x) != 0 || yy.Cmp(y) != 0 {
-		t.Error("unmarshal returned different values")
-		return
+
+	for _, test := range tests {
+		curve := test.curve
+		_, x, y, err := elliptic.GenerateKey(curve, rand.Reader)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		serialized := elliptic.Marshal(curve, x, y)
+		xx, yy := elliptic.Unmarshal(curve, serialized)
+		if xx == nil {
+			t.Error("failed to unmarshal")
+			return
+		}
+		if xx.Cmp(x) != 0 || yy.Cmp(y) != 0 {
+			t.Error("unmarshal returned different values")
+			return
+		}
 	}
 }
 
@@ -668,7 +682,7 @@ func TestMarshalCompressed(t *testing.T) {
 
 	t.Run("Invalid", func(t *testing.T) {
 		data, _ := hex.DecodeString("02fd4bf61763b46581fd9174d623516cf3c81edd40e29ffa2777fb6cb0ae3ce535")
-		X, Y := elliptic.UnmarshalCompressed(elliptic.P256(), data)
+		X, Y := UnmarshalCompressed(elliptic.P256(), data)
 		if X != nil || Y != nil {
 			t.Error("expected an error for invalid encoding")
 		}
@@ -699,18 +713,25 @@ func TestMarshalCompressed(t *testing.T) {
 		}
 		testMarshalCompressed(t, P521(), x, y, nil)
 	})
+	t.Run("P-256k1", func(t *testing.T) {
+		_, x, y, err := elliptic.GenerateKey(P256k1(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		testMarshalCompressed(t, P256k1(), x, y, nil)
+	})
 }
 
 func testMarshalCompressed(t *testing.T, curve elliptic.Curve, x, y *big.Int, want []byte) {
 	if !curve.IsOnCurve(x, y) {
 		t.Fatal("invalid test point")
 	}
-	got := elliptic.MarshalCompressed(curve, x, y)
+	got := MarshalCompressed(curve, x, y)
 	if want != nil && !bytes.Equal(got, want) {
 		t.Errorf("got unexpected MarshalCompressed result: got %x, want %x", got, want)
 	}
 
-	X, Y := elliptic.UnmarshalCompressed(curve, got)
+	X, Y := UnmarshalCompressed(curve, got)
 	if X == nil || Y == nil {
 		t.Fatalf("UnmarshalCompressed failed unexpectedly")
 	}

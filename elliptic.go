@@ -246,6 +246,53 @@ func (curve *CurveParams) ScalarBaseMult(k []byte) (*big.Int, *big.Int) {
 	return curve.ScalarMult(curve.Gx, curve.Gy, k)
 }
 
+// MarshalCompressed converts a point on the curve into the compressed form
+// specified in section 4.3.6 of ANSI X9.62.
+func MarshalCompressed(curve elliptic.Curve, x, y *big.Int) []byte {
+	// marshall is same as that of elliptic package
+	return elliptic.MarshalCompressed(curve, x, y)
+}
+
+// UnmarshalCompressed converts a point, serialized by MarshalCompressed, into an x, y pair.
+// It is an error if the point is not in compressed form or is not on the curve.
+// On error, x = nil.
+func UnmarshalCompressed(curve elliptic.Curve, data []byte) (x, y *big.Int) {
+	switch v := curve.(type) {
+	case secp256k1Curve:
+		return unmarshalCompressed(v.CurveParams, data)
+	default:
+		return elliptic.UnmarshalCompressed(curve, data)
+	}
+}
+
+func unmarshalCompressed(params *CurveParams, data []byte) (x, y *big.Int) {
+	byteLen := (params.BitSize + 7) / 8
+	if len(data) != 1+byteLen {
+		return nil, nil
+	}
+	if data[0] != 2 && data[0] != 3 { // compressed form
+		return nil, nil
+	}
+	p := params.P
+	x = new(big.Int).SetBytes(data[1:])
+	if x.Cmp(p) >= 0 {
+		return nil, nil
+	}
+	// y² = x³ + ax + b
+	y = params.polynomial(x)
+	y = y.ModSqrt(y, p)
+	if y == nil {
+		return nil, nil
+	}
+	if byte(y.Bit(0)) != data[0]&1 {
+		y.Neg(y).Mod(y, p)
+	}
+	if !params.IsOnCurve(x, y) {
+		return nil, nil
+	}
+	return
+}
+
 var initonce sync.Once
 var p384 *CurveParams
 var p521 *CurveParams
@@ -253,6 +300,7 @@ var p521 *CurveParams
 func initAll() {
 	initP384()
 	initP521()
+	initSecp256k1()
 }
 
 func initP384() {
@@ -307,4 +355,16 @@ func P384() elliptic.Curve {
 func P521() elliptic.Curve {
 	initonce.Do(initAll)
 	return p521
+}
+
+// P256k1 returns a Curve which implements secp256k1 (https://www.secg.org/sec2-v2.pdf, section 2.4.1),
+// also known as secp521k1. The CurveParams.Name of this Curve is "P-256k1".
+//
+// Multiple invocations of this function will return the same value, so it can
+// be used for equality checks and switch statements.
+//
+// The cryptographic operations do not use constant-time algorithms.
+func P256k1() elliptic.Curve {
+	initonce.Do(initAll)
+	return secp256k1
 }
