@@ -32,23 +32,20 @@ func TestRecoverPubkey(t *testing.T) {
 		} {
 
 			for _, flag := range []byte{
-				Ecc_Normal,
-				Ecc_LowerS,
-				Ecc_RecId,
-				Ecc_LowerS | Ecc_RecId,
+				Normal,
+				LowerS,
+				RecID,
+				LowerS | RecID,
 			} {
 				b, err := SignBytes(privKey, hashed, flag)
 				if err != nil {
 					t.Errorf("SignBytes failed for %T", curve)
 				}
 
-				k := testRecoverPubkey(t, curve.Params().Name, hashed, b, flag)
+				k := testRecoverPubkey(t, curve.Params(), hashed, b, flag)
 				if k != nil {
-					if !privKey.PublicKey.Equal(k[0]) {
-						t.Errorf("Recovered pubkey %v not equal %v", k[0], privKey.PublicKey)
-					}
-					if privKey.PublicKey.Equal(k[1]) {
-						t.Errorf("Tampered pubkey %v equal %v", k[1], privKey.PublicKey)
+					if !privKey.PublicKey.Equal(k) {
+						t.Errorf("Recovered pubkey %v not equal %v", k, privKey.PublicKey)
 					}
 				}
 			}
@@ -57,14 +54,14 @@ func TestRecoverPubkey(t *testing.T) {
 }
 
 // returns 2 pubkeys, first is the correct one, second is a key with tampered r
-func testRecoverPubkey(t *testing.T, name string, hash, sig []byte, flag byte) []*ecdsa.PublicKey {
+func testRecoverPubkey(t *testing.T, param *elliptic.CurveParams, hash, sig []byte, flag byte) *ecdsa.PublicKey {
 	var (
 		k, k1 *ecdsa.PublicKey
 		err   error
 	)
 
-	k, err = RecoverPubkey(name, hash, sig)
-	if flag&Ecc_RecId == 0 {
+	k, err = RecoverPubkey(param.Name, hash, sig)
+	if flag&RecID == 0 {
 		if err == nil {
 			t.Error("RecoverPubkey pass w/o recovery id")
 		}
@@ -87,34 +84,44 @@ func testRecoverPubkey(t *testing.T, name string, hash, sig []byte, flag byte) [
 	size := len(sig)
 	v := sig[size-1]
 	sig[size-1] = 4
-	if _, err = RecoverPubkey(name, hash, sig); err == nil {
+	if _, err = RecoverPubkey(param.Name, hash, sig); err == nil {
 		t.Error("RecoverPubkey pass with invalid recovery id")
 	}
 
 	// add N to r fails the recovery
 	if v <= 1 {
 		sig[size-1] = v + 2
-		if _, err = RecoverPubkey(name, hash, sig); err == nil {
+		if _, err = RecoverPubkey(param.Name, hash, sig); err == nil {
 			t.Error("RecoverPubkey pass with r+N")
 		}
 	}
-	sig[size-1] = v
 
-	// recover another key with tampered r
-	rSize := (size - 1) / 2
-	r := new(big.Int).SetBytes(sig[:rSize])
-	one := big.NewInt(1)
-	for {
-		r.Add(r, one)
-		r.FillBytes(sig[:rSize])
-		if k1, err = RecoverPubkey(name, hash, sig); err == nil {
-			break
-		}
+	// flipping the v, that is (r, s, v^1) will generate a different key
+	sig[size-1] = v ^ 1
+	if k1, err = RecoverPubkey(param.Name, hash, sig); err != nil {
+		t.Error("RecoverPubkey fail flipping")
 	}
 
-	// tampered key can pass verification as well
+	// this key can pass verification as well
 	if !VerifyBytes(k1, hash, sig, flag) {
-		t.Error("Tampered pubkey failed verification")
+		t.Error("Flipped pubkey failed verification")
 	}
-	return []*ecdsa.PublicKey{k, k1}
+
+	// but not equal to correct key
+	if k1.Equal(k) {
+		t.Errorf("Flipped pubkey %v equal %v", k1, k)
+	}
+
+	// ECDSA signature malleability: (r, N-s, v^1) is also a valid signature
+	rSize := (size - 1) / 2
+	s := new(big.Int).SetBytes(sig[rSize : 2*rSize])
+	s.Sub(param.N, s).FillBytes(sig[rSize : 2*rSize])
+	if k1, err = RecoverPubkey(param.Name, hash, sig); err != nil {
+		t.Error("RecoverPubkey fail flipping")
+	}
+	if !k.Equal(k1) {
+		t.Errorf("Flipped pubkey %v not equal %v", k, k1)
+	}
+
+	return k
 }

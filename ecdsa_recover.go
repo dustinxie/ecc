@@ -8,11 +8,11 @@ package ecc
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"errors"
 	"fmt"
 	"math/big"
 )
 
+// RecoverPubkey recovers the public key from the signature
 func RecoverPubkey(name string, hash, sig []byte) (*ecdsa.PublicKey, error) {
 	var (
 		curve elliptic.Curve
@@ -31,7 +31,7 @@ func RecoverPubkey(name string, hash, sig []byte) (*ecdsa.PublicKey, error) {
 		curve = P256k1()
 		A = new(big.Int)
 	default:
-		return nil, errors.New(fmt.Sprintf("Curve %s is not supported", name))
+		return nil, fmt.Errorf("Curve %s is not supported", name)
 	}
 
 	// check signature size
@@ -39,13 +39,13 @@ func RecoverPubkey(name string, hash, sig []byte) (*ecdsa.PublicKey, error) {
 	rSize := (param.BitSize + 7) >> 3
 	size := len(sig)
 	if size != 2*rSize+1 {
-		return nil, errors.New(fmt.Sprintf("Invalid signature size, expecting %d, actual %d", 2*rSize+1, size))
+		return nil, fmt.Errorf("Invalid signature size, expecting %d, actual %d", 2*rSize+1, size)
 	}
 
 	// check recovery id
 	v := sig[size-1]
 	if v > 3 {
-		return nil, errors.New(fmt.Sprintf("Invalid recovery id %d", v))
+		return nil, fmt.Errorf("Invalid recovery id %d", v)
 	}
 
 	// extract (r, s)
@@ -58,14 +58,14 @@ func RecoverPubkey(name string, hash, sig []byte) (*ecdsa.PublicKey, error) {
 		return nil, errZeroParam
 	}
 	if r.Cmp(param.N) >= 0 || s.Cmp(param.N) >= 0 {
-		return nil, errors.New(fmt.Sprintf("Signature (%s, %s) exceeds group order", r.String(), s.String()))
+		return nil, fmt.Errorf("Signature (%s, %s) exceeds group order", r.String(), s.String())
 	}
 
 	// compute point R = (r, y) = kG
 	var y *big.Int
 	r, y = computePointFromX(param, A, r, v)
 	if y == nil {
-		return nil, errors.New(fmt.Sprintf("X-coordinate %s is not on curve %s", r.String(), name))
+		return nil, fmt.Errorf("X-coordinate %s is not on curve %s", r.String(), name)
 	}
 
 	// key recovery
@@ -118,7 +118,7 @@ func recoverPubkey(curve elliptic.Curve, e, r, y, s *big.Int) (*ecdsa.PublicKey,
 	}
 
 	if e.Sign() <= 0 || s.Sign() <= 0 {
-		return nil, errors.New(fmt.Sprintf("Invalid public key (%s, %s)", s.String(), w.String()))
+		return nil, fmt.Errorf("Invalid public key (%s, %s)", s.String(), w.String())
 	}
 	return &ecdsa.PublicKey{
 		Curve: curve,

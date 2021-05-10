@@ -54,7 +54,22 @@ func BenchmarkSignP256(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _, _, _ = Sign(rand.Reader, priv, hashed, Ecc_Normal)
+			_, _, _, _ = Sign(rand.Reader, priv, hashed)
+		}
+	})
+}
+
+func BenchmarkSignP256k1(b *testing.B) {
+	b.ResetTimer()
+	p256k1 := P256k1()
+	hashed := []byte("testing")
+	priv, _ := ecdsa.GenerateKey(p256k1, rand.Reader)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _, _, _ = Sign(rand.Reader, priv, hashed)
 		}
 	})
 }
@@ -69,7 +84,7 @@ func BenchmarkSignP384(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _, _, _ = Sign(rand.Reader, priv, hashed, Ecc_Normal)
+			_, _, _, _ = Sign(rand.Reader, priv, hashed)
 		}
 	})
 }
@@ -79,7 +94,7 @@ func BenchmarkVerifyP256(b *testing.B) {
 	p256 := elliptic.P256()
 	hashed := []byte("testing")
 	priv, _ := ecdsa.GenerateKey(p256, rand.Reader)
-	r, s, _, _ := Sign(rand.Reader, priv, hashed, Ecc_Normal)
+	r, s, _, _ := Sign(rand.Reader, priv, hashed)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -107,7 +122,7 @@ func testSignAndVerify(t *testing.T, c elliptic.Curve, tag string) {
 	priv, _ := ecdsa.GenerateKey(c, rand.Reader)
 
 	hashed := []byte("testing")
-	r, s, _, err := Sign(rand.Reader, priv, hashed, Ecc_Normal)
+	r, s, _, err := Sign(rand.Reader, priv, hashed)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
@@ -169,14 +184,14 @@ func testNonceSafety(t *testing.T, c elliptic.Curve, tag string) {
 	priv, _ := ecdsa.GenerateKey(c, rand.Reader)
 
 	hashed := []byte("testing")
-	r0, s0, _, err := Sign(zeroReader, priv, hashed, Ecc_Normal)
+	r0, s0, _, err := Sign(zeroReader, priv, hashed)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
 	}
 
 	hashed = []byte("testing...")
-	r1, s1, _, err := Sign(zeroReader, priv, hashed, Ecc_Normal)
+	r1, s1, _, err := Sign(zeroReader, priv, hashed)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
@@ -207,13 +222,13 @@ func testINDCCA(t *testing.T, c elliptic.Curve, tag string) {
 	priv, _ := ecdsa.GenerateKey(c, rand.Reader)
 
 	hashed := []byte("testing")
-	r0, s0, _, err := Sign(rand.Reader, priv, hashed, Ecc_Normal)
+	r0, s0, _, err := Sign(rand.Reader, priv, hashed)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
 	}
 
-	r1, s1, _, err := Sign(rand.Reader, priv, hashed, Ecc_Normal)
+	r1, s1, _, err := Sign(rand.Reader, priv, hashed)
 	if err != nil {
 		t.Errorf("%s: error signing: %s", tag, err)
 		return
@@ -397,7 +412,7 @@ func TestZeroHashSignature(t *testing.T) {
 		}
 
 		// Sign a hash consisting of all zeros.
-		r, s, _, err := Sign(rand.Reader, privKey, zeroHash, Ecc_Normal)
+		r, s, _, err := Sign(rand.Reader, privKey, zeroHash)
 		if err != nil {
 			panic(err)
 		}
@@ -428,10 +443,10 @@ func TestSignBytes(t *testing.T) {
 		} {
 
 			for _, flag := range []byte{
-				Ecc_Normal,
-				Ecc_LowerS,
-				Ecc_RecId,
-				Ecc_LowerS | Ecc_RecId,
+				Normal,
+				LowerS,
+				RecID,
+				LowerS | RecID,
 			} {
 				b, err := SignBytes(privKey, hashed, flag)
 				if err != nil {
@@ -459,34 +474,34 @@ func testSignBytes(t *testing.T, pubkey *ecdsa.PublicKey, hash, sig []byte, flag
 	}
 	sig = sig[:size]
 
-	if (flag & Ecc_RecId) != 0 {
+	if (flag & RecID) != 0 {
 		// invalid recovery id fails verification
 		v := sig[size-1]
 		sig[size-1] = 4
-		if VerifyBytes(pubkey, hash, sig, Ecc_RecId) {
+		if VerifyBytes(pubkey, hash, sig, RecID) {
 			t.Error("VerifyBytes pass with invalid recovery id")
 		}
-		if VerifyBytes(pubkey, hash, sig, Ecc_Normal) {
-			t.Error("VerifyBytes pass flag = Ecc_Normal with invalid recovery id")
+		if VerifyBytes(pubkey, hash, sig, Normal) {
+			t.Error("VerifyBytes pass flag = Normal with invalid recovery id")
 		}
 		sig[size-1] = v
 
 		// remove recovery id fails verification
-		if VerifyBytes(pubkey, hash, sig[:size-1], Ecc_RecId) {
+		if VerifyBytes(pubkey, hash, sig[:size-1], RecID) {
 			t.Error("VerifyBytes pass w/o recovery id")
 		}
-		if !VerifyBytes(pubkey, hash, sig[:size-1], Ecc_Normal) {
-			t.Error("VerifyBytes fail flag = Ecc_Normal w/o recovery id")
+		if !VerifyBytes(pubkey, hash, sig[:size-1], Normal) {
+			t.Error("VerifyBytes fail flag = Normal w/o recovery id")
 		}
 	} else {
-		// signature w/o recovery id fails flag = Ecc_RecId
-		if VerifyBytes(pubkey, hash, sig, Ecc_RecId) {
-			t.Error("VerifyBytes pass flag = Ecc_RecId")
+		// signature w/o recovery id fails flag = RecID
+		if VerifyBytes(pubkey, hash, sig, RecID) {
+			t.Error("VerifyBytes pass flag = RecID")
 		}
 	}
 
-	if (flag & Ecc_LowerS) != 0 {
-		_, s, v := decodeSigBytes(pubkey, sig)
+	if (flag & LowerS) != 0 {
+		_, s, v := decodeSigBytes(pubkey.Params(), sig)
 		curveParam := pubkey.Curve.Params()
 		rSize := (curveParam.BitSize + 7) >> 3
 		s.Sub(curveParam.N, s)
@@ -497,15 +512,15 @@ func testSignBytes(t *testing.T, pubkey *ecdsa.PublicKey, hash, sig []byte, flag
 			t.Error("VerifyBytes pass with (r, N-s)")
 		}
 
-		// (r, N-s) can pass flag = Ecc_Normal
-		if (flag & Ecc_RecId) != 0 {
+		// (r, N-s) can pass flag = Normal
+		if (flag & RecID) != 0 {
 			if v > 3 {
 				t.Errorf("Invalid recovery id = %d", v)
 			}
 			sig = sig[:size-1]
 		}
-		if !VerifyBytes(pubkey, hash, sig, Ecc_Normal) {
-			t.Error("VerifyBytes fail flag = Ecc_Normal with (r, N-s)")
+		if !VerifyBytes(pubkey, hash, sig, Normal) {
+			t.Error("VerifyBytes fail flag = Normal with (r, N-s)")
 		}
 	}
 }

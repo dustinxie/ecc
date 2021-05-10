@@ -26,6 +26,7 @@ type CurveParams struct {
 	A *big.Int // the linear coefficient of the curve equation
 }
 
+// Params returns the curve params
 func (curve *CurveParams) Params() *elliptic.CurveParams {
 	return &curve.CurveParams
 }
@@ -78,6 +79,7 @@ func (curve *CurveParams) affineFromJacobian(x, y, z *big.Int) (xOut, yOut *big.
 	return
 }
 
+// Add adds 2 points
 func (curve *CurveParams) Add(x1, y1, x2, y2 *big.Int) (*big.Int, *big.Int) {
 	z1 := zForAffine(x1, y1)
 	z2 := zForAffine(x2, y2)
@@ -162,6 +164,7 @@ func (curve *CurveParams) addJacobian(x1, y1, z1, x2, y2, z2 *big.Int) (*big.Int
 	return x3, y3, z3
 }
 
+// Double doubles the point
 func (curve *CurveParams) Double(x1, y1 *big.Int) (*big.Int, *big.Int) {
 	z1 := zForAffine(x1, y1)
 	return curve.affineFromJacobian(curve.doubleJacobian(x1, y1, z1))
@@ -225,6 +228,7 @@ func (curve *CurveParams) doubleJacobian(x, y, z *big.Int) (*big.Int, *big.Int, 
 	return x3, y3, z3
 }
 
+// ScalarMult computes scalar multiplication of a given point
 func (curve *CurveParams) ScalarMult(Bx, By *big.Int, k []byte) (*big.Int, *big.Int) {
 	Bz := new(big.Int).SetInt64(1)
 	x, y, z := new(big.Int), new(big.Int), new(big.Int)
@@ -242,6 +246,7 @@ func (curve *CurveParams) ScalarMult(Bx, By *big.Int, k []byte) (*big.Int, *big.
 	return curve.affineFromJacobian(x, y, z)
 }
 
+// ScalarBaseMult computes scalar multiplication of the base point
 func (curve *CurveParams) ScalarBaseMult(k []byte) (*big.Int, *big.Int) {
 	return curve.ScalarMult(curve.Gx, curve.Gy, k)
 }

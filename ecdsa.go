@@ -110,7 +110,7 @@ var errZeroParam = errors.New("zero parameter")
 // private key's curve order, the hash will be truncated to that length. It
 // returns the signature as a pair of integers. The security of the private key
 // depends on the entropy of rand.
-func Sign(rand io.Reader, priv *ecdsa.PrivateKey, hash []byte, flag byte) (r, s *big.Int, recid byte, err error) {
+func Sign(rand io.Reader, priv *ecdsa.PrivateKey, hash []byte) (r, s *big.Int, recid byte, err error) {
 	MaybeReadByte(rand)
 
 	// Get min(log2(q) / 2, 256) bits of entropy from rand.
@@ -147,7 +147,7 @@ func Sign(rand io.Reader, priv *ecdsa.PrivateKey, hash []byte, flag byte) (r, s 
 
 	// See [NSA] 3.4.1
 	c := priv.PublicKey.Curve
-	return sign(priv, &csprng, c, hash, flag)
+	return sign(priv, &csprng, c, hash)
 }
 
 // sign also returns a byte (recovery id) for public key recovery
@@ -156,7 +156,7 @@ func Sign(rand io.Reader, priv *ecdsa.PrivateKey, hash []byte, flag byte) (r, s 
 // recid = 1: x = r, y is odd
 // recid = 2: x = r+N, y is even
 // recid = 3: x = r+N, y is odd
-func sign(priv *ecdsa.PrivateKey, csprng *cipher.StreamReader, c elliptic.Curve, hash []byte, flag byte) (r, s *big.Int, recid byte, err error) {
+func sign(priv *ecdsa.PrivateKey, csprng *cipher.StreamReader, c elliptic.Curve, hash []byte) (r, s *big.Int, recid byte, err error) {
 	N := c.Params().N
 	if N.Sign() == 0 {
 		return nil, nil, 0, errZeroParam
@@ -197,10 +197,7 @@ func sign(priv *ecdsa.PrivateKey, csprng *cipher.StreamReader, c elliptic.Curve,
 		s.Mul(s, kInv)
 		s.Mod(s, N) // N != 0
 		if s.Sign() != 0 {
-			// in case of Ecc_LowerS, enforce s <= N/2 to prevent signature malleability
-			if (flag&Ecc_LowerS) == 0 || s.Cmp(new(big.Int).Rsh(N, 1)) <= 0 {
-				break
-			}
+			break
 		}
 	}
 
@@ -284,10 +281,11 @@ func (z *zr) Read(dst []byte) (n int, err error) {
 
 var zeroReader = &zr{}
 
+// signing options
 const (
-	Ecc_Normal byte = 0
-	Ecc_LowerS byte = 1 // return (r, s) with s <= N/2
-	Ecc_RecId  byte = 2 // return recovery id in addition to (r, s)
+	Normal byte = 0
+	LowerS byte = 1 // return (r, s) with s <= N/2
+	RecID  byte = 2 // return recovery id in addition to (r, s)
 )
 
 const (
@@ -295,30 +293,40 @@ const (
 	invalidSigLength byte = 255
 )
 
+// SignBytes returns the signature in bytes
 func SignBytes(priv *ecdsa.PrivateKey, hash []byte, flag byte) ([]byte, error) {
-	r, s, v, err := Sign(rand.Reader, priv, hash, flag)
+	r, s, v, err := Sign(rand.Reader, priv, hash)
 	if err != nil {
 		return nil, err
 	}
 
+	// in case of LowerS, enforce s <= N/2 to prevent signature malleability
+	param := priv.Curve.Params()
+	if (flag&LowerS) != 0 && s.Cmp(new(big.Int).Rsh(param.N, 1)) > 0 {
+		s.Sub(param.N, s)
+		v ^= 1
+	}
+
 	// ECDSA returns 0 < r, s < N
-	rSize := (priv.Curve.Params().BitSize + 7) >> 3
+	rSize := (param.BitSize + 7) >> 3
 	sig := make([]byte, 2*rSize, 2*rSize+1)
 	r.FillBytes(sig[:rSize])
 	s.FillBytes(sig[rSize:])
 
-	if (flag & Ecc_RecId) != 0 {
+	if (flag & RecID) != 0 {
 		sig = append(sig, v)
 	}
 	return sig, nil
 }
 
+// VerifyBytes verifies the signature in bytes
 func VerifyBytes(pub *ecdsa.PublicKey, hash, sig []byte, flag byte) bool {
-	r, s, v := decodeSigBytes(pub, sig)
+	param := pub.Curve.Params()
+	r, s, v := decodeSigBytes(param, sig)
 	if v == invalidSigLength {
 		return false
 	}
-	if (flag & Ecc_RecId) != 0 {
+	if (flag & RecID) != 0 {
 		if v > 3 {
 			return false
 		}
@@ -328,18 +336,15 @@ func VerifyBytes(pub *ecdsa.PublicKey, hash, sig []byte, flag byte) bool {
 		}
 	}
 
-	N := pub.Curve.Params().N
-	if (flag & Ecc_LowerS) != 0 {
-		// verify s <= N/2
-		if s.Cmp(new(big.Int).Rsh(N, 1)) == 1 {
-			return false
-		}
+	// in case of LowerS, verify s <= N/2
+	if (flag&LowerS) != 0 && s.Cmp(new(big.Int).Rsh(param.N, 1)) == 1 {
+		return false
 	}
 	return ecdsa.Verify(pub, hash, r, s)
 }
 
-func decodeSigBytes(pub *ecdsa.PublicKey, sig []byte) (r, s *big.Int, recid byte) {
-	rSize := (pub.Curve.Params().BitSize + 7) >> 3
+func decodeSigBytes(param *elliptic.CurveParams, sig []byte) (r, s *big.Int, recid byte) {
+	rSize := (param.BitSize + 7) >> 3
 
 	switch len(sig) {
 	case 2 * rSize:
